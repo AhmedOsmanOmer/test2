@@ -1,0 +1,24 @@
+# /etc/systemd/system/gp-erp.service — تشغيل النظام كخدمة دائمة تعيد التشغيل تلقائيًا
+[Unit]
+Description=Printing gate ERP
+After=network.target postgresql.service
+Requires=postgresql.service
+
+[Service]
+Type=simple
+User=gperp
+WorkingDirectory=/opt/gp-erp
+EnvironmentFile=/opt/gp-erp/.env
+Environment=NODE_ENV=production
+ExecStart=/usr/bin/node node_modules/next/dist/bin/next start -p 3000 -H 127.0.0.1
+Restart=always
+RestartSec=5
+# تقوية
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/gp-erp/storage /opt/gp-erp/.next/cache
+
+[Install]
+WantedBy=multi-user.target

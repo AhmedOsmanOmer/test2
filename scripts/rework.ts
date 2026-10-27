@@ -1,0 +1,42 @@
+/** اختبار مسار رفض الجودة وإعادة الإنتاج */
+import "dotenv/config";
+import assert from "node:assert/strict";
+import { randomUUID } from "crypto";
+import { db } from "../src/lib/db";
+import { loadActor } from "../src/server/actor";
+import { createCustomer } from "../src/server/services/customers";
+import { createOrder, setDepositReceived } from "../src/server/services/orders";
+import { createProductionOrder, startProduction, logProgress, completeProduction } from "../src/server/services/production";
+import { inspect } from "../src/server/services/quality";
+
+const as = async (u: string) => (await loadActor((await db.user.findUniqueOrThrow({ where: { username: u } })).id))!;
+const checks = { dimensions: true, colors: false, printQuality: true, materials: true, finishing: true, packaging: true, quantity: true };
+(async () => {
+  if (process.env.NODE_ENV === "production") throw new Error("ممنوع على بيئة الإنتاج");
+  const [sales, salessup, sup, qc] = await Promise.all(["sales", "salessup", "supervisor", "qc"].map(as));
+  const c = await createCustomer(sales, { name: "(اختبار) عميل إعادة إنتاج", type: "INDIVIDUAL" });
+  const o = await createOrder(sales, { customerId: c.id, dueDate: new Date(Date.now() + 86400_000), requiresDesign: false, total: 575, items: [{ name: "استيكر دائري", quantity: 500, unit: "قطعة" }] });
+  await db.order.update({ where: { id: o.id }, data: { status: "AWAITING_DEPOSIT" } });
+  await setDepositReceived(salessup, o.id, true);
+  assert.equal((await db.order.findUniqueOrThrow({ where: { id: o.id } })).status, "MATERIALS_PREP");
+  const item = await db.orderItem.findFirstOrThrow({ where: { orderId: o.id } });
+  const po = await createProductionOrder(sup, { orderId: o.id, orderItemId: item.id, quantity: 500, stages: ["الطباعة", "القص"] });
+  await startProduction(sup, po.id);
+  await logProgress(sup, { productionOrderId: po.id, goodQty: 500, scrapQty: 0, idempotencyKey: randomUUID() });
+  await completeProduction(sup, po.id);
+  await inspect(qc, { productionOrderId: po.id, acceptedQty: 380, rejectedQty: 120, checks, result: "REWORK", rejectReason: "اختلاف درجة الأحمر" });
+  const rework = await db.productionOrder.findFirstOrThrow({ where: { parentId: po.id } });
+  assert.equal(rework.quantity, 120);
+  assert.equal((await db.task.count({ where: { sourceType: "QC_REJECT", orderId: o.id } })), 1);
+  assert.equal((await db.order.findUniqueOrThrow({ where: { id: o.id } })).status, "REWORK");
+  console.log("  ✓ الرفض أنشأ أمر إعادة إنتاج (120) ومهمة تصحيحية، والطلب في «إعادة إنتاج»");
+  await startProduction(sup, rework.id);
+  await logProgress(sup, { productionOrderId: rework.id, goodQty: 120, scrapQty: 0, idempotencyKey: randomUUID() });
+  await completeProduction(sup, rework.id);
+  await inspect(qc, { productionOrderId: rework.id, acceptedQty: 120, rejectedQty: 0, checks: { ...checks, colors: true }, result: "ACCEPTED" });
+  const fin = await db.order.findUniqueOrThrow({ where: { id: o.id }, include: { items: true } });
+  assert.equal(fin.status, "READY_FOR_DELIVERY");
+  assert.equal(fin.items[0].approvedQty, 500);
+  console.log("  ✓ بعد اجتياز إعادة الإنتاج: 500 معتمدة والطلب جاهز للتسليم\n  ✅ مسار الرفض وإعادة الإنتاج نجح");
+  await db.$disconnect();
+})().catch(async (e) => { console.error("  ❌", e.message); await db.$disconnect(); process.exit(1); });

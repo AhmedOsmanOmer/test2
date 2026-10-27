@@ -1,0 +1,14 @@
+node_modules/
+.next/
+.env
+.env*
+!.env.example
+storage/
+*.tsbuildinfo
+src/generated/
+.runtime/
+_audit/
+_report/
+_demo/
+.DS_Store
+task*.md

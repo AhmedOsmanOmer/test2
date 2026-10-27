@@ -1,0 +1,56 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root { color-scheme: light; }
+html.dark { color-scheme: dark; }
+body { @apply bg-paper text-ink antialiased; font-feature-settings: "tnum"; }
+html.dark body { background: #0F1724; color: #E4E9F1; }
+
+@layer components {
+  .card { @apply bg-paper-card border border-paper-line rounded-lg; }
+  html.dark .card { background: #162133; border-color: #26364F; }
+  /* 16px على الجوال واللوحي حتى لا يكبّر iOS الصفحة عند التركيز، و14px على سطح المكتب كما كان */
+  .input { @apply w-full min-w-0 rounded-md border border-paper-line bg-white px-3 py-2 text-base outline-none transition focus:border-cyan-process focus:ring-2 focus:ring-cyan-process/20 lg:text-sm; }
+  html.dark .input { background: #0F1724; border-color: #2B3C57; color: #E4E9F1; }
+  .label { @apply mb-1 block text-xs font-medium text-ink-soft; }
+  html.dark .label { color: #9FB0C8; }
+  .btn { @apply inline-flex items-center justify-center gap-2 rounded-md px-3.5 py-2 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cyan-process; }
+  .btn-primary { @apply btn bg-cyan-process text-white hover:bg-cyan-deep; }
+  .btn-ghost { @apply btn border border-paper-line bg-white text-ink hover:bg-paper; }
+  html.dark .btn-ghost { background: #162133; border-color: #2B3C57; color: #E4E9F1; }
+  .btn-danger { @apply btn bg-magenta-process text-white hover:opacity-90; }
+  .th { @apply px-3 py-2.5 text-start text-xs font-semibold text-ink-soft; }
+  .td { @apply px-3 py-2.5 text-sm; }
+  .tab { @apply inline-flex min-h-[44px] items-center border-b-2 border-transparent px-3 py-2 text-sm text-ink-soft hover:text-ink lg:min-h-0; }
+  .tab-active { @apply border-cyan-process font-semibold text-ink; }
+}
+/* ---------- الجوال واللوحي (أقل من 1024px) ---------- */
+/* أهداف لمس 44px داخل المحتوى؛ :where بلا أولوية حتى تبقى أصناف العرض (block/flex/btn) كما هي، وسطح المكتب لا يتغير */
+@media (max-width: 1023.98px) {
+  :where(main) :where(a[href]) { display: inline-flex; align-items: center; min-height: 44px; min-width: 44px; }
+  :where(main) :where(button, summary, select, [role="button"]) { min-height: 44px; min-width: 44px; }
+  :where(main) :where(input:not([type="checkbox"]):not([type="radio"]):not([type="hidden"]):not([type="file"])) { min-height: 44px; }
+  :where(main) :where(input[type="file"]) { min-height: 44px; padding-top: 0.6rem; }
+  :where(main) :where(label:has(> input[type="checkbox"]), label:has(> input[type="radio"])) { display: flex; align-items: center; min-height: 44px; }
+  :where(main) :where(input[type="checkbox"], input[type="radio"]) { width: 1.15rem; height: 1.15rem; }
+}
+
+/* هوامش أفقية تحترم حواف الشاشات ذات النتوء (viewport-fit=cover) */
+.safe-x { padding-left: max(1rem, env(safe-area-inset-left)); padding-right: max(1rem, env(safe-area-inset-right)); }
+@media (min-width: 640px) { .safe-x { padding-left: max(1.5rem, env(safe-area-inset-left)); padding-right: max(1.5rem, env(safe-area-inset-right)); } }
+
+/* نمط الجداول الموحد: حاوية تمرير أفقي داخلية (الصفحة نفسها لا تتمرر أفقيًا) مع عمود أول ثابت */
+.table-scroll { overflow-x: auto; overscroll-behavior-x: contain; -webkit-overflow-scrolling: touch; max-width: 100%; }
+.table-scroll > table { width: 100%; min-width: var(--table-min, 0px); }
+.table-sticky > table th:first-child, .table-sticky > table td:first-child { position: sticky; inset-inline-start: 0; z-index: 1; background: #fff; box-shadow: inset -1px 0 0 #DDE3EA; }
+html.dark .table-sticky > table th:first-child, html.dark .table-sticky > table td:first-child { background: #162133; box-shadow: inset -1px 0 0 #26364F; }
+
+/* النصوص الطويلة (عربية أو أرقام طلبات) تلتف بدل أن توسّع الصفحة */
+.wrap-anywhere { overflow-wrap: anywhere; }
+main img, main video, main iframe { max-width: 100%; height: auto; }
+
+/* علامة التسجيل CMYK — توقيع الهوية */
+.cmyk-strip { background: linear-gradient(90deg, #00A0DC 0 25%, #D6246E 25% 50%, #F2B71F 50% 75%, #14213D 75%); }
+@media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
+@media print { .no-print { display: none !important; } body { background: white; } }

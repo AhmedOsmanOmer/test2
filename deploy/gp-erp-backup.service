@@ -1,0 +1,7 @@
+[Unit]
+Description=Printing gate ERP backup
+[Service]
+Type=oneshot
+User=gperp
+EnvironmentFile=/opt/gp-erp/.env
+ExecStart=/opt/gp-erp/scripts/backup.sh

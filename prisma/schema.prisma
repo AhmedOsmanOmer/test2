@@ -1,0 +1,895 @@
+// =====================================================================
+// Printing gate ERP — مخطط قاعدة البيانات
+// شركة بوابة الطباعة للدعاية والإعلان
+// المبالغ: Decimal(14,2) بالريال السعودي (قيمة الطلب والمدفوع فقط). الكميات: Int.
+// =====================================================================
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ---------------------------------------------------------------------
+// الفروع (جاهزية لتعدد الفروع)
+// ---------------------------------------------------------------------
+model Branch {
+  id        String   @id @default(cuid())
+  code      String   @unique
+  name      String
+  address   String?
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+
+  users     User[]
+  customers Customer[]
+  orders    Order[]
+  machines  Machine[]
+}
+
+// ---------------------------------------------------------------------
+// المستخدمون والصلاحيات
+// ---------------------------------------------------------------------
+model User {
+  id                 String      @id @default(cuid())
+  username           String      @unique
+  fullName           String
+  email              String?     @unique
+  phone              String?
+  passwordHash       String
+  isActive           Boolean     @default(true)
+  mustChangePassword Boolean     @default(false)
+  branchId           String?
+  branch             Branch?     @relation(fields: [branchId], references: [id])
+  department         Department?
+  lastLoginAt        DateTime?
+  failedLoginCount   Int         @default(0)
+  lockedUntil        DateTime?
+  createdAt          DateTime    @default(now())
+  updatedAt          DateTime    @updatedAt
+
+  roles               UserRole[]
+  permissionOverrides UserPermissionOverride[]
+  sessions            Session[]
+  salesOrders         Order[]                  @relation("OrderSalesRep")
+  createdOrders       Order[]                  @relation("OrderCreatedBy")
+  designTasks         DesignTask[]             @relation("DesignAssignee")
+  designVersions      DesignVersion[]
+  designApprovals     DesignApproval[]
+  productionOrders    ProductionOrder[]        @relation("ProdAssignee")
+  productionStages    ProductionStage[]        @relation("StageAssignee")
+  productionLogs      ProductionLog[]
+  inspections         QualityInspection[]
+  deliveries          Delivery[]               @relation("DeliveryHandler")
+  tasksAssigned       Task[]                   @relation("TaskAssignee")
+  tasksCreated        Task[]                   @relation("TaskCreator")
+  notifications       Notification[]
+  attachments         Attachment[]
+  auditLogs           AuditLog[]
+  orderEvents         OrderEvent[]
+  itemImports         OrderItemImport[]
+  statusChanges       OrderStatusHistory[]
+  comments            OrderComment[]
+  machinesResponsible Machine[]
+}
+
+enum Department {
+  MANAGEMENT
+  SALES
+  DESIGN
+  PRODUCTION
+  QUALITY
+  INVENTORY
+  ACCOUNTING
+  DELIVERY
+}
+
+model Role {
+  id          String           @id @default(cuid())
+  key         String           @unique // SUPER_ADMIN, OPERATIONS_MANAGER ...
+  name        String // الاسم العربي
+  description String?
+  isSystem    Boolean          @default(false)
+  permissions RolePermission[]
+  users       UserRole[]
+}
+
+model Permission {
+  id        String                   @id @default(cuid())
+  key       String                   @unique // orders.view, finance.view ...
+  name      String
+  module    String
+  roles     RolePermission[]
+  overrides UserPermissionOverride[]
+}
+
+model RolePermission {
+  roleId       String
+  permissionId String
+  role         Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission   Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@id([roleId, permissionId])
+}
+
+model UserRole {
+  userId String
+  roleId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role   Role   @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@id([userId, roleId])
+}
+
+// صلاحية استثنائية لموظف معيّن (منح أو سحب)
+model UserPermissionOverride {
+  userId       String
+  permissionId String
+  granted      Boolean // true = منح ، false = سحب
+  reason       String?
+  expiresAt    DateTime?
+  user         User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  permission   Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@id([userId, permissionId])
+}
+
+model Session {
+  id        String   @id // sha256 لرمز الجلسة؛ الرمز الخام في الكوكي فقط
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  ip        String?
+  userAgent String?
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+}
+
+model LoginAttempt {
+  id        String   @id @default(cuid())
+  username  String
+  ip        String?
+  success   Boolean
+  createdAt DateTime @default(now())
+
+  @@index([username, createdAt])
+  @@index([ip, createdAt])
+}
+
+// ---------------------------------------------------------------------
+// الترقيم التلقائي (GP-2026-0001 ...) — يُحدَّث داخل معاملة
+// ---------------------------------------------------------------------
+model Counter {
+  key   String @id // GP-2026, PR-2026, DN-2026 ...
+  value Int    @default(0)
+}
+
+// ---------------------------------------------------------------------
+// العملاء
+// ---------------------------------------------------------------------
+enum CustomerType {
+  INDIVIDUAL
+  COMPANY
+}
+
+model Customer {
+  id            String       @id @default(cuid())
+  code          String       @unique // C-00001
+  name          String
+  type          CustomerType @default(COMPANY)
+  phone         String?
+  whatsapp      String?
+  email         String?
+  city          String?
+  address       String?
+  crNumber      String? // السجل التجاري
+  vatNumber     String? // الرقم الضريبي
+  category      String? // تصنيف العميل (VIP، جهة حكومية...)
+  internalNotes String?
+  isActive      Boolean      @default(true)
+  branchId      String?
+  branch        Branch?      @relation(fields: [branchId], references: [id])
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+
+  contacts       CustomerContact[]
+  communications CommunicationLog[]
+  orders         Order[]
+  attachments    Attachment[]
+
+  @@index([name])
+  @@index([phone])
+}
+
+model CustomerContact {
+  id         String   @id @default(cuid())
+  customerId String
+  customer   Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  name       String
+  title      String?
+  phone      String?
+  email      String?
+  isPrimary  Boolean  @default(false)
+}
+
+model CommunicationLog {
+  id         String   @id @default(cuid())
+  customerId String
+  customer   Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  channel    String // هاتف، واتساب، بريد، زيارة
+  summary    String
+  userId     String?
+  createdAt  DateTime @default(now())
+
+  @@index([customerId, createdAt])
+}
+
+// ---------------------------------------------------------------------
+// الإعدادات المرجعية
+// ---------------------------------------------------------------------
+model ProductCategory {
+  id            String      @id @default(cuid())
+  name          String      @unique
+  defaultStages String[] // مراحل الإنتاج الافتراضية لهذا التصنيف
+  isActive      Boolean     @default(true)
+  orderItems    OrderItem[]
+}
+
+// أسعار/تكاليف قابلة للتحديث من الإدارة (للحاسبة)
+
+model SystemSetting {
+  key       String   @id // company.nameAr, work.hours ...
+  value     Json
+  updatedAt DateTime @updatedAt
+  updatedBy String?
+}
+
+// ---------------------------------------------------------------------
+// الطلبات
+// ---------------------------------------------------------------------
+enum OrderStatus {
+  NEW
+  REVIEW
+  AWAITING_CUSTOMER_APPROVAL
+  AWAITING_DEPOSIT
+  AWAITING_DESIGN
+  IN_DESIGN
+  DESIGN_REVIEW
+  AWAITING_DESIGN_APPROVAL
+  MATERIALS_PREP
+  PRODUCTION_SCHEDULED
+  IN_PRODUCTION
+  FINISHING_PACKAGING
+  QUALITY_CHECK
+  READY_FOR_DELIVERY
+  OUT_FOR_DELIVERY
+  DELIVERED
+  CLOSED
+  // حالات استثنائية
+  ON_HOLD
+  NEEDS_REVISION
+  REWORK
+  CANCELLED
+  RETURNED
+}
+
+enum Priority {
+  LOW
+  NORMAL
+  HIGH
+  URGENT
+}
+
+model Order {
+  id               String       @id @default(cuid())
+  number           String       @unique // GP-2026-0001
+  branchId         String?
+  branch           Branch?      @relation(fields: [branchId], references: [id])
+  customerId       String
+  customer         Customer     @relation(fields: [customerId], references: [id])
+  salesRepId       String
+  salesRep         User         @relation("OrderSalesRep", fields: [salesRepId], references: [id])
+  createdById      String
+  createdBy        User         @relation("OrderCreatedBy", fields: [createdById], references: [id])
+  orderType        String? // طباعة تجارية، لوحات، تغليف ...
+  priority         Priority     @default(NORMAL)
+  status           OrderStatus  @default(NEW)
+  statusBeforeHold OrderStatus? // لاستئناف المعلّق
+  requiresDesign   Boolean      @default(true)
+  requiresQC       Boolean      @default(true)
+  dueDate          DateTime
+  isLate           Boolean      @default(false) // يُحسب دوريًا وعند كل تغيير
+  delayReason      String?
+  notes            String?
+  // المال: قيمة واحدة يدخلها شخص مخوّل + المدفوع. المتبقي = total - paidAmount (يُحسب ولا يُخزَّن)
+  total            Decimal      @default(0) @db.Decimal(14, 2)
+  paidAmount       Decimal      @default(0) @db.Decimal(14, 2)
+  depositReceived  Boolean      @default(false) // تأكيد استلام الدفعة المقدمة (شرط بدء التصميم/الإنتاج)
+  completedAt      DateTime?
+  closedAt         DateTime?
+  cancelledAt      DateTime?
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+  version          Int          @default(0) // قفل تفاؤلي لمنع تعارض التحديثات
+
+  items            OrderItem[]
+  statusHistory    OrderStatusHistory[]
+  events           OrderEvent[]
+  comments         OrderComment[]
+  designTasks      DesignTask[]
+  productionOrders ProductionOrder[]
+  deliveries       Delivery[]
+  tasks            Task[]
+  attachments      Attachment[]
+  notifications    Notification[]
+  itemImports      OrderItemImport[]
+
+  @@index([status])
+  @@index([dueDate])
+  @@index([customerId])
+  @@index([salesRepId])
+}
+
+enum ItemStatus {
+  PENDING
+  IN_DESIGN
+  DESIGN_APPROVED
+  IN_PRODUCTION
+  QC
+  READY
+  PARTIALLY_DELIVERED
+  DELIVERED
+  CANCELLED
+  REWORK
+}
+
+model OrderItem {
+  id                String           @id @default(cuid())
+  orderId           String
+  order             Order            @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  categoryId        String?
+  category          ProductCategory? @relation(fields: [categoryId], references: [id])
+  name              String
+  description       String?
+  quantity          Int
+  length            Decimal?         @db.Decimal(10, 2)
+  width             Decimal?         @db.Decimal(10, 2)
+  height            Decimal?         @db.Decimal(10, 2)
+  unit              String           @default("قطعة")
+  dimensionUnit     String?          @default("سم")
+  material          String?
+  materialThickness String?
+  printType         String?
+  colors            String?
+  finishing         String?
+  packaging         String?
+  technicalNotes    String?
+  status            ItemStatus       @default(PENDING)
+  // كميات مرحلية لدعم التسليم الجزئي
+  producedQty       Int              @default(0)
+  approvedQty       Int              @default(0) // اجتاز الجودة
+  deliveredQty      Int              @default(0)
+  cancelledQty      Int              @default(0) // إلغاء جزئي
+  sortOrder         Int              @default(0)
+
+  designTasks      DesignTask[]
+  productionOrders ProductionOrder[]
+  deliveryItems    DeliveryItem[]
+  attachments      Attachment[]
+
+  @@index([orderId])
+}
+
+model OrderStatusHistory {
+  id          String       @id @default(cuid())
+  orderId     String
+  order       Order        @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  fromStatus  OrderStatus?
+  toStatus    OrderStatus
+  reason      String?
+  changedById String
+  changedBy   User         @relation(fields: [changedById], references: [id])
+  createdAt   DateTime     @default(now())
+
+  @@index([orderId, createdAt])
+}
+
+// السجل الزمني: إلحاقي فقط (لا تعديل ولا حذف من التطبيق)
+model OrderEvent {
+  id        String   @id @default(cuid())
+  orderId   String
+  order     Order    @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  type      String // ORDER_CREATED, ORDER_VALUE_UPDATED, DESIGN_APPROVED ...
+  message   String
+  data      Json?
+  actorId   String?
+  actor     User?    @relation(fields: [actorId], references: [id])
+  createdAt DateTime @default(now())
+
+  @@index([orderId, createdAt])
+}
+
+model OrderComment {
+  id        String   @id @default(cuid())
+  orderId   String
+  order     Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  body      String
+  authorId  String
+  author    User     @relation(fields: [authorId], references: [id])
+  createdAt DateTime @default(now())
+}
+
+// ---------------------------------------------------------------------
+// التصميم
+// ---------------------------------------------------------------------
+enum DesignStatus {
+  PENDING
+  IN_PROGRESS
+  INTERNAL_REVIEW
+  SENT_TO_CUSTOMER
+  CHANGES_REQUESTED
+  APPROVED
+  CANCELLED
+}
+
+model DesignTask {
+  id                String         @id @default(cuid())
+  number            String         @unique // DS-2026-0001
+  orderId           String
+  order             Order          @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  orderItemId       String?
+  orderItem         OrderItem?     @relation(fields: [orderItemId], references: [id])
+  assigneeId        String?
+  assignee          User?          @relation("DesignAssignee", fields: [assigneeId], references: [id])
+  instructions      String?
+  priority          Priority       @default(NORMAL)
+  status            DesignStatus   @default(PENDING)
+  assignedAt        DateTime?
+  dueDate           DateTime?
+  revisionCount     Int            @default(0)
+  approvedVersionId String?        @unique
+  approvedVersion   DesignVersion? @relation("ApprovedVersion", fields: [approvedVersionId], references: [id])
+  createdAt         DateTime       @default(now())
+  updatedAt         DateTime       @updatedAt
+
+  versions  DesignVersion[]
+  approvals DesignApproval[]
+
+  @@index([assigneeId, status])
+}
+
+model DesignVersion {
+  id           String           @id @default(cuid())
+  designTaskId String
+  designTask   DesignTask       @relation(fields: [designTaskId], references: [id], onDelete: Cascade)
+  versionNo    Int
+  notes        String?
+  uploadedById String
+  uploadedBy   User             @relation(fields: [uploadedById], references: [id])
+  createdAt    DateTime         @default(now())
+  files        Attachment[]
+  approvals    DesignApproval[]
+  approvedFor  DesignTask?      @relation("ApprovedVersion")
+
+  @@unique([designTaskId, versionNo])
+}
+
+enum ApprovalDecision {
+  INTERNAL_APPROVED
+  INTERNAL_REJECTED
+  CUSTOMER_APPROVED
+  CUSTOMER_CHANGES
+}
+
+model DesignApproval {
+  id                String           @id @default(cuid())
+  designTaskId      String
+  designTask        DesignTask       @relation(fields: [designTaskId], references: [id], onDelete: Cascade)
+  versionId         String
+  version           DesignVersion    @relation(fields: [versionId], references: [id])
+  decision          ApprovalDecision
+  approverName      String? // اسم الشخص لدى العميل
+  feedback          String?
+  recordedById      String
+  recordedBy        User             @relation(fields: [recordedById], references: [id])
+  proofAttachmentId String? // إثبات الموافقة
+  createdAt         DateTime         @default(now())
+}
+
+// ---------------------------------------------------------------------
+// الإنتاج والآلات
+// ---------------------------------------------------------------------
+enum MachineStatus {
+  RUNNING
+  AVAILABLE
+  STOPPED
+  MAINTENANCE
+}
+
+model Machine {
+  id              String        @id @default(cuid())
+  code            String        @unique
+  name            String
+  type            String // UV، DTF UV، طباعة أوفست، قص ليزر، بلوتر ...
+  capacityPerHour Int? // الطاقة التشغيلية (وحدة/ساعة)
+  capacityUnit    String?
+  status          MachineStatus @default(AVAILABLE)
+  responsibleId   String?
+  responsible     User?         @relation(fields: [responsibleId], references: [id])
+  runningHours    Decimal       @default(0) @db.Decimal(10, 2)
+  showOnBoard     Boolean       @default(true)
+  branchId        String?
+  branch          Branch?       @relation(fields: [branchId], references: [id])
+  isActive        Boolean       @default(true)
+  createdAt       DateTime      @default(now())
+
+  maintenance      MachineMaintenance[]
+  productionOrders ProductionOrder[]
+  stages           ProductionStage[]
+}
+
+model MachineMaintenance {
+  id           String    @id @default(cuid())
+  machineId    String
+  machine      Machine   @relation(fields: [machineId], references: [id], onDelete: Cascade)
+  kind         String // صيانة دورية / عطل
+  description  String
+  startedAt    DateTime
+  endedAt      DateTime?
+  recordedById String?
+  createdAt    DateTime  @default(now())
+}
+
+enum ProductionStatus {
+  PLANNED
+  SCHEDULED
+  IN_PROGRESS
+  PAUSED
+  COMPLETED
+  QC_PENDING
+  QC_PASSED
+  QC_FAILED
+  CANCELLED
+}
+
+model ProductionOrder {
+  id           String            @id @default(cuid())
+  number       String            @unique // PR-2026-0001
+  orderId      String
+  order        Order             @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  orderItemId  String
+  orderItem    OrderItem         @relation(fields: [orderItemId], references: [id])
+  batchNo      Int               @default(1) // تقسيم الطلبات الكبيرة إلى دفعات
+  parentId     String? // أمر إعادة الإنتاج يرتبط بالأصل
+  parent       ProductionOrder?  @relation("Rework", fields: [parentId], references: [id])
+  reworks      ProductionOrder[] @relation("Rework")
+  quantity     Int
+  machineId    String?
+  machine      Machine?          @relation(fields: [machineId], references: [id])
+  assigneeId   String?
+  assignee     User?             @relation("ProdAssignee", fields: [assigneeId], references: [id])
+  priority     Priority          @default(NORMAL)
+  status       ProductionStatus  @default(PLANNED)
+  plannedStart DateTime?
+  plannedEnd   DateTime?
+  actualStart  DateTime?
+  actualEnd    DateTime?
+  completedQty Int               @default(0)
+  scrapQty     Int               @default(0)
+  progressPct  Int               @default(0)
+  notes        String?
+  createdAt    DateTime          @default(now())
+  updatedAt    DateTime          @updatedAt
+
+  stages      ProductionStage[]
+  logs        ProductionLog[]
+  inspections QualityInspection[]
+
+  @@index([status])
+  @@index([machineId, plannedStart])
+}
+
+enum StageStatus {
+  PENDING
+  IN_PROGRESS
+  DONE
+  SKIPPED
+  BLOCKED
+}
+
+model ProductionStage {
+  id                String          @id @default(cuid())
+  productionOrderId String
+  productionOrder   ProductionOrder @relation(fields: [productionOrderId], references: [id], onDelete: Cascade)
+  name              String // تجهيز الملفات، الطباعة، القص ...
+  sequence          Int
+  status            StageStatus     @default(PENDING)
+  machineId         String?
+  machine           Machine?        @relation(fields: [machineId], references: [id])
+  assigneeId        String?
+  assignee          User?           @relation("StageAssignee", fields: [assigneeId], references: [id])
+  plannedStart      DateTime?
+  plannedEnd        DateTime?
+  startedAt         DateTime?
+  completedAt       DateTime?
+
+  @@unique([productionOrderId, sequence])
+}
+
+model ProductionLog {
+  id                String          @id @default(cuid())
+  productionOrderId String
+  productionOrder   ProductionOrder @relation(fields: [productionOrderId], references: [id], onDelete: Cascade)
+  stageId           String?
+  goodQty           Int             @default(0)
+  scrapQty          Int             @default(0)
+  scrapReason       String?
+  note              String?
+  userId            String
+  user              User            @relation(fields: [userId], references: [id])
+  idempotencyKey    String?         @unique
+  createdAt         DateTime        @default(now())
+}
+
+// ---------------------------------------------------------------------
+// الجودة
+// ---------------------------------------------------------------------
+enum QcResult {
+  ACCEPTED
+  ACCEPTED_WITH_NOTES
+  REJECTED
+  REWORK
+}
+
+model QualityInspection {
+  id                String           @id @default(cuid())
+  productionOrderId String?
+  productionOrder   ProductionOrder? @relation(fields: [productionOrderId], references: [id])
+  inspectedQty      Int
+  acceptedQty       Int
+  rejectedQty       Int              @default(0)
+  checks            Json // { dimensions:true, colors:true, printQuality:true, ... }
+  result            QcResult
+  rejectReason      String?
+  notes             String?
+  inspectorId       String
+  inspector         User             @relation(fields: [inspectorId], references: [id])
+  createdAt         DateTime         @default(now())
+}
+
+// ---------------------------------------------------------------------
+// التسليم
+// ---------------------------------------------------------------------
+enum DeliveryMethod {
+  PICKUP
+  COURIER
+  SHIPPING_COMPANY
+  THIRD_PARTY
+}
+
+enum DeliveryStatus {
+  PREPARING
+  OUT_FOR_DELIVERY
+  DELIVERED
+  CANCELLED
+}
+
+model Delivery {
+  id             String         @id @default(cuid())
+  number         String         @unique // DN-2026-0001
+  orderId        String
+  order          Order          @relation(fields: [orderId], references: [id])
+  method         DeliveryMethod
+  status         DeliveryStatus @default(PREPARING)
+  address        String?
+  handlerId      String?
+  handler        User?          @relation("DeliveryHandler", fields: [handlerId], references: [id])
+  recipientName  String?
+  recipientPhone String?
+  signatureData  String? // توقيع (صورة base64 مضغوطة) أو مرجع مرفق
+  isFinal        Boolean        @default(false)
+  deliveredAt    DateTime?
+  notes          String?
+  idempotencyKey String         @unique
+  createdAt      DateTime       @default(now())
+  items          DeliveryItem[]
+  proofs         Attachment[]
+}
+
+model DeliveryItem {
+  id          String    @id @default(cuid())
+  deliveryId  String
+  delivery    Delivery  @relation(fields: [deliveryId], references: [id], onDelete: Cascade)
+  orderItemId String
+  orderItem   OrderItem @relation(fields: [orderItemId], references: [id])
+  quantity    Int
+
+  @@unique([deliveryId, orderItemId])
+}
+
+// ---------------------------------------------------------------------
+// المهام والإشعارات والمرفقات والتدقيق
+// ---------------------------------------------------------------------
+enum TaskStatus {
+  NEW
+  IN_PROGRESS
+  BLOCKED
+  DONE
+  CANCELLED
+}
+
+model Task {
+  id          String        @id @default(cuid())
+  number      String        @unique
+  orderId     String?
+  order       Order?        @relation(fields: [orderId], references: [id])
+  department  Department
+  title       String
+  description String?
+  priority    Priority      @default(NORMAL)
+  status      TaskStatus    @default(NEW)
+  assigneeId  String?
+  assignee    User?         @relation("TaskAssignee", fields: [assigneeId], references: [id])
+  creatorId   String
+  creator     User          @relation("TaskCreator", fields: [creatorId], references: [id])
+  dueDate     DateTime?
+  progressPct Int           @default(0)
+  sourceType  String? // QC_REJECT, MANUAL ...
+  sourceId    String?
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+  history     TaskHistory[]
+
+  @@index([assigneeId, status])
+}
+
+model TaskHistory {
+  id        String   @id @default(cuid())
+  taskId    String
+  task      Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  change    Json
+  actorId   String
+  createdAt DateTime @default(now())
+}
+
+model Notification {
+  id          String    @id @default(cuid())
+  userId      String
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type        String
+  title       String
+  body        String?
+  link        String?
+  isImportant Boolean   @default(false)
+  readAt      DateTime?
+  // الطلب المرتبط (للتصفية حسب نطاق الطلبات وفتح الإشعار)
+  orderId     String?
+  order       Order?    @relation(fields: [orderId], references: [id], onDelete: SetNull)
+  // قنوات مستقبلية: email / whatsapp عبر جدول صادر منفصل
+  createdAt   DateTime  @default(now())
+
+  @@index([userId, readAt])
+  @@index([userId, readAt, createdAt])
+  @@index([orderId])
+}
+
+// قائمة انتظار للقنوات الخارجية (بريد، واتساب) — غير مفعلة في النسخة الأولى
+model OutboundMessage {
+  id        String    @id @default(cuid())
+  channel   String // EMAIL / WHATSAPP
+  to        String
+  template  String
+  payload   Json
+  status    String    @default("PENDING")
+  attempts  Int       @default(0)
+  sentAt    DateTime?
+  createdAt DateTime  @default(now())
+}
+
+enum AttachmentKind {
+  DESIGN
+  REFERENCE
+  PRODUCT_PHOTO
+  APPROVAL_PROOF
+  WORK_ORDER
+  QC_REPORT
+  DELIVERY_NOTE
+  DELIVERY_PROOF // صورة إثبات التسليم (إلزامية مع كل تسليم)
+  OTHER
+}
+
+model Attachment {
+  id              String         @id @default(cuid())
+  kind            AttachmentKind
+  originalName    String
+  storageKey      String         @unique // اسم عشوائي في مجلد التخزين الخاص
+  mimeType        String
+  sizeBytes       Int
+  sha256          String
+  groupKey        String? // يجمع إصدارات الملف نفسه
+  versionNo       Int            @default(1)
+  orderId         String?
+  order           Order?         @relation(fields: [orderId], references: [id])
+  orderItemId     String?
+  orderItem       OrderItem?     @relation(fields: [orderItemId], references: [id])
+  customerId      String?
+  customer        Customer?      @relation(fields: [customerId], references: [id])
+  // سجل التسليم الذي تثبته الصورة (لصور DELIVERY_PROOF)
+  deliveryId      String?
+  delivery        Delivery?      @relation(fields: [deliveryId], references: [id])
+  designVersionId String?
+  designVersion   DesignVersion? @relation(fields: [designVersionId], references: [id])
+  uploadedById    String
+  uploadedBy      User           @relation(fields: [uploadedById], references: [id])
+  createdAt       DateTime       @default(now())
+
+  @@index([orderId])
+  @@index([deliveryId])
+  @@index([customerId])
+  @@index([originalName])
+}
+
+// سجل التدقيق: إلحاقي فقط
+model AuditLog {
+  id        String   @id @default(cuid())
+  actorId   String?
+  actor     User?    @relation(fields: [actorId], references: [id])
+  action    String // LOGIN, LOGIN_FAILED, ORDER_STATUS, ORDER_MONEY ...
+  entity    String?
+  entityId  String?
+  before    Json?
+  after     Json?
+  ip        String?
+  createdAt DateTime @default(now())
+
+  @@index([entity, entityId])
+  @@index([actorId, createdAt])
+  @@index([action, createdAt])
+}
+
+// ---------------------------------------------------------------------
+// شاشة الإنتاج المباشر
+// ---------------------------------------------------------------------
+model LiveBoardDevice {
+  id         String    @id @default(cuid())
+  name       String // شاشة صالة الطباعة
+  tokenHash  String    @unique // رمز الجهاز (sha256) — صلاحية قراءة الشاشة فقط
+  isActive   Boolean   @default(true)
+  config     Json // الأقسام، الآلات، العدد، الألوان، فترة التحديث، التمرير
+  lastSeenAt DateTime?
+  createdAt  DateTime  @default(now())
+}
+
+// ---------------------------------------------------------------------
+// استيراد بنود الطلب من Excel: معاينة ثم تأكيد. الملف نفسه لا يُحفظ (البصمة والاسم والحجم فقط)
+// ---------------------------------------------------------------------
+enum ImportStatus {
+  PREVIEW
+  COMMITTED
+  CANCELLED
+  EXPIRED
+}
+
+model OrderItemImport {
+  id           String       @id @default(cuid())
+  orderId      String?
+  order        Order?       @relation(fields: [orderId], references: [id], onDelete: SetNull)
+  fileName     String
+  fileSha256   String
+  sizeBytes    Int
+  status       ImportStatus @default(PREVIEW)
+  rows         Json         // البنود المتحقق منها (بلا أي حقول مالية)
+  errors       Json         // [{row, column, value, message}]
+  totalRows    Int
+  uploadedById String
+  uploadedBy   User         @relation(fields: [uploadedById], references: [id])
+  committedAt  DateTime?
+  createdAt    DateTime     @default(now())
+
+  @@index([orderId, fileSha256])
+  @@index([uploadedById, createdAt])
+}
